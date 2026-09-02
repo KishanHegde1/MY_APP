@@ -1,0 +1,4 @@
+export enum LocalRideRouteSource {
+  GOOGLE_ROUTES = 'GOOGLE_ROUTES',
+  ESTIMATED_PREVIEW = 'ESTIMATED_PREVIEW',
+}

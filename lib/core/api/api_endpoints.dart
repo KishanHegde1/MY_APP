@@ -1,0 +1,24 @@
+abstract final class ApiEndpoints {
+  static const health = '/health';
+  static const auth = '/auth';
+  static const login = '$auth/login';
+  static const register = '$auth/register';
+  static const refreshToken = '$auth/refresh';
+  static const forgotPassword = '$auth/forgot-password';
+  static const verifyOtp = '$auth/verify-otp';
+  static const users = '/users';
+  static const profile = '$users/me';
+  static const addresses = '/addresses';
+  static const localRides = '/local-rides';
+  static const outstationRides = '/outstation-rides';
+  static const vehicleRentals = '/vehicle-rentals';
+  static const roomRentals = '/room-rentals';
+  static const propertyRentals = '/property-rentals';
+  static const bookings = '/bookings';
+  static const payments = '/payments';
+  static const wallets = '/wallets';
+  static const notifications = '/notifications';
+  static const chats = '/chats';
+  static const reviews = '/reviews';
+  static const favourites = '/favourites';
+}

@@ -1,0 +1,3 @@
+# Add this line to your existing android/local.properties file.
+# Do not replace sdk.dir or flutter.sdk, and do not commit the real key.
+MAPS_API_KEY=YOUR_ANDROID_MAPS_API_KEY
