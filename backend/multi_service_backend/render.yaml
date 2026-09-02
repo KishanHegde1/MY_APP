@@ -3,7 +3,6 @@ services:
     name: multi-service-backend
     runtime: node
     plan: free
-    rootDir: backend/multi_service_backend
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start:prod
     healthCheckPath: /api/v1/health
