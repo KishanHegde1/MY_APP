@@ -1,5 +1,10 @@
 import 'dotenv/config';
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import {
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -17,4 +22,11 @@ import { UsersModule } from './modules/users/users.module';
 const databaseImports = process.env.DATABASE_URL ? [TypeOrmModule.forRoot(createTypeOrmOptions(configuration()))] : [];
 
 @Module({ imports: [ConfigModule.forRoot({ isGlobal: true, load: [configuration], validationSchema: envValidationSchema }), ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]), ...databaseImports, HealthModule, AuthModule, UsersModule, LocalRidesModule, PlaceholderModulesModule, IntegrationModulesModule] })
-export class AppModule implements NestModule { configure(consumer: MiddlewareConsumer): void { consumer.apply(RequestIdMiddleware).forRoutes('*'); } }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes({
+      path: '{*path}',
+      method: RequestMethod.ALL,
+    });
+  }
+}
