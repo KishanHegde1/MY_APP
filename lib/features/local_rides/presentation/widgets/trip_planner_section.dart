@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_colors.dart';
@@ -75,24 +73,9 @@ class TripPlannerSection extends StatefulWidget {
 }
 
 class _TripPlannerSectionState extends State<TripPlannerSection> {
-  final TextEditingController _pickupController = TextEditingController();
-  final FocusNode _pickupFocus = FocusNode();
-  final TextEditingController _destinationController = TextEditingController();
-  final FocusNode _destinationFocus = FocusNode();
   RideRoutePlan? _plan;
   String? _selectedRouteId;
   String? _error;
-  bool _isPlanning = false;
-  bool _isResolvingPickup = false;
-  bool _pickupTextChanged = false;
-  int _requestId = 0;
-  int _pickupRequestId = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _writePickupLabel(widget.pickup);
-  }
 
   RideRouteOption? get _selectedRoute {
     final plan = _plan;
@@ -106,141 +89,14 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
   @override
   void didUpdateWidget(covariant TripPlannerSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_sameLocation(oldWidget.pickup, widget.pickup) ||
-        oldWidget.selectedVehicle != widget.selectedVehicle) {
+    if (oldWidget.selectedVehicle != widget.selectedVehicle) {
       _plan = null;
       _selectedRouteId = null;
       _error = null;
-      _requestId++;
-    }
-    if (!_sameLocation(oldWidget.pickup, widget.pickup)) {
-      _writePickupLabel(widget.pickup);
-    }
-  }
-
-  @override
-  void dispose() {
-    _pickupController.dispose();
-    _pickupFocus.dispose();
-    _destinationController.dispose();
-    _destinationFocus.dispose();
-    super.dispose();
-  }
-
-  Future<void> _compareRoutes() async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    var pickup = widget.pickup;
-    final destination = _destinationController.text.trim();
-    if (pickup == null || _pickupTextChanged) {
-      pickup = await _confirmTypedPickup();
-    }
-    if (pickup == null) {
-      if (mounted) {
-        setState(
-          () => _error =
-              'Enter a pickup, use current GPS, or choose an exact map pin.',
-        );
-        _pickupFocus.requestFocus();
-      }
-      return;
-    }
-    if (widget.selectedVehicle == null) {
-      setState(() => _error = 'Choose Bike, Auto, or Car to see route prices.');
-      return;
-    }
-    if (destination.length < 3) {
-      setState(() => _error = 'Enter an area, landmark, or destination.');
-      _destinationFocus.requestFocus();
-      return;
-    }
-
-    final requestId = ++_requestId;
-    setState(() {
-      _isPlanning = true;
-      _error = null;
-    });
-    try {
-      final plan = await widget.routePlanningService.planRoutes(
-        pickup: pickup,
-        destinationQuery: destination,
-        vehicle: switch (widget.selectedVehicle!) {
-          RideVehicleType.bike => RideRouteVehicle.bike,
-          RideVehicleType.auto => RideRouteVehicle.auto,
-          RideVehicleType.car => RideRouteVehicle.car,
-        },
-      );
-      if (!mounted || requestId != _requestId) return;
-      final recommended = plan.routes.where((route) => route.isRecommended);
-      setState(() {
-        _plan = plan;
-        _selectedRouteId = recommended.isEmpty
-            ? plan.routes.first.id
-            : recommended.first.id;
-        _isPlanning = false;
-      });
-    } on RoutePlanningException catch (error) {
-      if (!mounted || requestId != _requestId) return;
-      setState(() {
-        _error = error.message;
-        _isPlanning = false;
-      });
-    } on Object {
-      if (!mounted || requestId != _requestId) return;
-      setState(() {
-        _error =
-            'Routes are unavailable right now. Check the destination and try again.';
-        _isPlanning = false;
-      });
-    }
-  }
-
-  Future<LocationModel?> _confirmTypedPickup() async {
-    final query = _pickupController.text.trim();
-    if (query.length < 3) {
-      setState(() => _error = 'Enter at least 3 characters for your pickup.');
-      _pickupFocus.requestFocus();
-      return null;
-    }
-
-    final requestId = ++_pickupRequestId;
-    setState(() {
-      _isResolvingPickup = true;
-      _error = null;
-    });
-    try {
-      final resolved = await widget.pickupResolver.resolve(
-        query: query,
-        near: widget.pickup,
-      );
-      if (!mounted || requestId != _pickupRequestId) return null;
-      if (resolved == null) {
-        setState(() {
-          _isResolvingPickup = false;
-          _error =
-              'We could not find that pickup. Add the area, city, or landmark.';
-        });
-        return null;
-      }
-      await widget.onPickupSelected(resolved, PickupLocationSource.manual);
-      if (!mounted) return resolved;
-      _writePickupLabel(resolved);
-      setState(() {
-        _isResolvingPickup = false;
-        _error = null;
-      });
-      return resolved;
-    } on Object {
-      if (!mounted || requestId != _pickupRequestId) return null;
-      setState(() {
-        _isResolvingPickup = false;
-        _error = 'Pickup search is unavailable. Check the address and retry.';
-      });
-      return null;
     }
   }
 
   Future<void> _planTripOnMap() async {
-    FocusManager.instance.primaryFocus?.unfocus();
     final vehicle = widget.selectedVehicle;
     if (vehicle == null) {
       setState(
@@ -260,7 +116,9 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
             MaterialPageRoute<MapTripSelection>(
               fullscreenDialog: true,
               builder: (_) => MapTripPlannerScreen(
-                initialPickup: widget.pickup,
+                // Start every trip with a new pin instead of carrying a
+                // previous GPS or manually entered location forward.
+                initialPickup: null,
                 vehicle: _routeVehicle(vehicle),
                 routePlanningService: widget.routePlanningService,
               ),
@@ -268,7 +126,7 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
           )
         : await widget.mapTripPlanner!(
             context,
-            widget.pickup,
+            null,
             _routeVehicle(vehicle),
             widget.routePlanningService,
           );
@@ -278,46 +136,11 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
       PickupLocationSource.mapPin,
     );
     if (!mounted) return;
-    _writePickupLabel(selection.plan.pickup);
-    final destinationLabel = selection.plan.destination.label?.trim();
-    final destinationText = destinationLabel == null || destinationLabel.isEmpty
-        ? '${selection.plan.destination.latitude.toStringAsFixed(6)}, ${selection.plan.destination.longitude.toStringAsFixed(6)}'
-        : destinationLabel;
-    _destinationController
-      ..text = destinationText
-      ..selection = TextSelection.collapsed(offset: destinationText.length);
     setState(() {
       _plan = selection.plan;
       _selectedRouteId = selection.selectedRoute.id;
-      _pickupTextChanged = false;
       _error = null;
     });
-  }
-
-  Future<void> _useCurrentGps() async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    _pickupRequestId++;
-    await widget.onRequestPickup();
-  }
-
-  void _writePickupLabel(LocationModel? location) {
-    if (location == null) return;
-    final label = location.label?.trim();
-    final value = label != null && label.isNotEmpty
-        ? label
-        : '${location.latitude.toStringAsFixed(6)}, '
-              '${location.longitude.toStringAsFixed(6)}';
-    _pickupController
-      ..text = value
-      ..selection = TextSelection.collapsed(offset: value.length);
-    _pickupTextChanged = false;
-  }
-
-  void _useSuggestion(String suggestion) {
-    _destinationController
-      ..text = suggestion
-      ..selection = TextSelection.collapsed(offset: suggestion.length);
-    setState(() => _error = null);
   }
 
   void _selectRoute(RideRouteOption route) {
@@ -356,7 +179,6 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final pickup = widget.pickup;
     final plan = _plan;
 
     return Column(
@@ -385,52 +207,9 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _JourneyFields(
-                pickup: pickup,
-                locationStatus: widget.locationStatus,
-                pickupController: _pickupController,
-                pickupFocus: _pickupFocus,
-                destinationController: _destinationController,
-                destinationFocus: _destinationFocus,
-                isResolvingPickup: _isResolvingPickup,
-                onPickupChanged: (_) {
-                  _pickupRequestId++;
-                  _pickupTextChanged = true;
-                  if (_error != null) setState(() => _error = null);
-                },
-                onConfirmPickup: _confirmTypedPickup,
-                onRequestPickup: _useCurrentGps,
-                onPlanTripOnMap: _planTripOnMap,
-                onSubmitted: (_) => unawaited(_compareRoutes()),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Quick destinations',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: colors.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 9),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final suggestion in const <String>[
-                    'Airport',
-                    'Railway station',
-                    'City centre',
-                  ])
-                    ActionChip(
-                      avatar: Icon(
-                        _suggestionIcon(suggestion),
-                        size: 17,
-                        color: colors.primary,
-                      ),
-                      label: Text(suggestion),
-                      onPressed: () => _useSuggestion(suggestion),
-                    ),
-                ],
+              _GoogleMapsLaunchPanel(
+                onOpenMap: _planTripOnMap,
+                isReady: plan != null,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 14),
@@ -442,34 +221,24 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
               ],
               const SizedBox(height: 18),
               FilledButton.icon(
-                key: const Key('compare-routes-button'),
-                onPressed: _isPlanning ? null : _compareRoutes,
+                key: const Key('open-google-maps-button'),
+                onPressed: _planTripOnMap,
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(54),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(17),
                   ),
                 ),
-                icon: _isPlanning
-                    ? const SizedBox.square(
-                        dimension: 19,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2.2,
-                        ),
-                      )
-                    : const Icon(Icons.route_rounded),
-                label: Text(
-                  _isPlanning
-                      ? 'Finding route alternatives…'
-                      : 'View routes & fares',
+                icon: const Icon(Icons.map_outlined),
+                label: const Text(
+                  'Open Google Maps',
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
               const SizedBox(height: 10),
               Text(
-                'Fares come from the selected route. You can still pin start and '
-                'drop on the map if you want an exact location.',
+                'Choose your starting point and drop point on the map. '
+                'Route choices and fares return here after you confirm.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colors.onSurfaceVariant,
@@ -524,22 +293,82 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
     );
   }
 
-  static bool _sameLocation(LocationModel? first, LocationModel? second) =>
-      first?.latitude == second?.latitude &&
-      first?.longitude == second?.longitude;
-
-  static IconData _suggestionIcon(String suggestion) => switch (suggestion) {
-    'Airport' => Icons.flight_takeoff_rounded,
-    'Railway station' => Icons.train_rounded,
-    _ => Icons.location_city_rounded,
-  };
-
   static RideRouteVehicle _routeVehicle(RideVehicleType vehicle) =>
       switch (vehicle) {
         RideVehicleType.bike => RideRouteVehicle.bike,
         RideVehicleType.auto => RideRouteVehicle.auto,
         RideVehicleType.car => RideRouteVehicle.car,
       };
+}
+
+class _GoogleMapsLaunchPanel extends StatelessWidget {
+  const _GoogleMapsLaunchPanel({
+    required this.onOpenMap,
+    required this.isReady,
+  });
+
+  final VoidCallback onOpenMap;
+  final bool isReady;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Material(
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.48),
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpenMap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(Icons.map_rounded, color: colors.primary),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isReady
+                          ? 'Your route is ready'
+                          : 'Choose start & drop on Google Maps',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isReady
+                          ? 'Tap to change either point and get fresh route choices.'
+                          : 'Set your pickup pin first, then set your drop pin. '
+                                'Confirm a route to return here for fares.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        height: 1.38,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.open_in_new_rounded, color: colors.primary, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _PlannerHeading extends StatelessWidget {
@@ -575,8 +404,8 @@ class _PlannerHeading extends StatelessWidget {
               ),
               const SizedBox(height: 5),
               Text(
-                'Add your starting point and drop location, then compare the '
-                'best routes and fares.',
+                'Open Google Maps, pin your start and drop points, then choose '
+                'the route and fare that suit you.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   height: 1.4,
@@ -618,6 +447,9 @@ class _PlannerHeading extends StatelessWidget {
   }
 }
 
+/*
+ * The previous manual start/drop form is deliberately kept out of the
+ * rendered flow. Trip points now come exclusively from the map picker above.
 class _JourneyFields extends StatelessWidget {
   const _JourneyFields({
     required this.pickup,
@@ -846,6 +678,8 @@ class _LocationInputShell extends StatelessWidget {
   }
 }
 
+*/
+
 class _InlineMessage extends StatelessWidget {
   const _InlineMessage({
     required this.icon,
@@ -924,7 +758,8 @@ class _RoutesEmptyState extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'You’ll see every returned alternative with distance, time, and price.',
+                  'Open Google Maps, set your start and drop pins, then confirm '
+                  'a route to see its distance, time, and price here.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colors.onSurfaceVariant,
                     height: 1.35,
