@@ -5,6 +5,7 @@ import 'package:geocoding/geocoding.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/services/location_service.dart';
 import '../../../../shared/models/location_model.dart';
 import '../../domain/models/map_trip_selection.dart';
 import '../../domain/models/ride_checkout_details.dart';
@@ -27,12 +28,14 @@ class MapTripPlannerScreen extends StatefulWidget {
     required this.routePlanningService,
     required this.vehicle,
     this.initialPickup,
+    this.locationService,
     super.key,
   });
 
   final RoutePlanningService routePlanningService;
   final RideRouteVehicle vehicle;
   final LocationModel? initialPickup;
+  final LocationService? locationService;
 
   @override
   State<MapTripPlannerScreen> createState() => _MapTripPlannerScreenState();
@@ -44,7 +47,10 @@ class _MapTripPlannerScreenState extends State<MapTripPlannerScreen> {
 
   final Completer<GoogleMapController> _mapController =
       Completer<GoogleMapController>();
+  final TextEditingController _placeSearchController =
+      TextEditingController();
   late final CameraPosition _initialCamera;
+  late final LocationService _locationService;
   late LocationModel _candidate;
   late bool _hasCandidate;
   _MapTripStep _step = _MapTripStep.pickup;
@@ -56,7 +62,10 @@ class _MapTripPlannerScreenState extends State<MapTripPlannerScreen> {
   bool _cameraMoving = false;
   bool _resolvingAddress = false;
   bool _planningDirections = false;
+  bool _isSearchingPlace = false;
+  bool _isFindingPreciseLocation = false;
   int _addressRequestId = 0;
+  int _searchRequestId = 0;
 
   RideRouteOption? get _selectedRoute {
     final plan = _plan;
@@ -70,6 +79,7 @@ class _MapTripPlannerScreenState extends State<MapTripPlannerScreen> {
   @override
   void initState() {
     super.initState();
+    _locationService = widget.locationService ?? const DeviceLocationService();
     _pickup = widget.initialPickup;
     _step = _pickup == null ? _MapTripStep.pickup : _MapTripStep.destination;
     final initial = _pickup;
@@ -87,6 +97,8 @@ class _MapTripPlannerScreenState extends State<MapTripPlannerScreen> {
   @override
   void dispose() {
     _addressRequestId++;
+    _searchRequestId++;
+    _placeSearchController.dispose();
     super.dispose();
   }
 
@@ -134,6 +146,113 @@ class _MapTripPlannerScreenState extends State<MapTripPlannerScreen> {
       _resolvingAddress = false;
     });
   }
+
+  Future<void> _searchForPlace() async {
+    if (_step == _MapTripStep.directions || _isSearchingPlace) return;
+    final query = _placeSearchController.text.trim();
+    if (query.length < 3) {
+      setState(() {
+        _error = 'Enter at least 3 characters to search for a place.';
+      });
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    final requestId = ++_searchRequestId;
+    setState(() {
+      _isSearchingPlace = true;
+      _error = null;
+    });
+    try {
+      final results = await Geocoding()
+          .locationFromAddress(query)
+          .timeout(const Duration(seconds: 10));
+      if (!mounted || requestId != _searchRequestId) return;
+      if (results.isEmpty) {
+        setState(() => _error = 'No matching place was found. Try more detail.');
+        return;
+      }
+      final result = results.first;
+      await _moveCandidateTo(
+        LocationModel(
+          latitude: result.latitude,
+          longitude: result.longitude,
+          label: query,
+        ),
+      );
+    } on Exception {
+      if (!mounted || requestId != _searchRequestId) return;
+      setState(() {
+        _error =
+            'We could not find that place. Check the spelling or search a nearby landmark.';
+      });
+    } finally {
+      if (mounted && requestId == _searchRequestId) {
+        setState(() => _isSearchingPlace = false);
+      }
+    }
+  }
+
+  Future<void> _usePreciseLocation() async {
+    if (_step != _MapTripStep.pickup || _isFindingPreciseLocation) return;
+    setState(() {
+      _isFindingPreciseLocation = true;
+      _error = null;
+    });
+    final result = await _locationService.requestCurrentLocation();
+    if (!mounted) return;
+    final location = result.location;
+    if (location == null) {
+      setState(() {
+        _isFindingPreciseLocation = false;
+        _error = _locationIssueMessage(result.issue);
+      });
+      return;
+    }
+    try {
+      await _moveCandidateTo(location);
+    } finally {
+      if (mounted) {
+        setState(() => _isFindingPreciseLocation = false);
+      }
+    }
+  }
+
+  Future<void> _moveCandidateTo(LocationModel location) async {
+    _addressRequestId++;
+    if (mounted) {
+      setState(() {
+        _candidate = LocationModel(
+          latitude: location.latitude,
+          longitude: location.longitude,
+          label: location.label ?? _coordinateLabel(location),
+        );
+        _hasCandidate = true;
+        _cameraMoving = false;
+        _resolvingAddress = false;
+        _error = null;
+      });
+    }
+    final controller = await _mapController.future;
+    await controller.animateCamera(
+      CameraUpdate.newLatLngZoom(
+        LatLng(location.latitude, location.longitude),
+        17,
+      ),
+    );
+  }
+
+  static String _locationIssueMessage(LocationAccessIssue? issue) =>
+      switch (issue) {
+        LocationAccessIssue.serviceDisabled =>
+          'Turn on GPS to use your precise pickup location.',
+        LocationAccessIssue.permissionDenied =>
+          'Allow location access to use your precise pickup location.',
+        LocationAccessIssue.permissionPermanentlyDenied =>
+          'Location permission is blocked. Enable it in your phone settings, then try again.',
+        LocationAccessIssue.positionUnavailable || null =>
+          'Your precise location is unavailable. Try again or search for your pickup.',
+      };
 
   Future<void> _setPinOrPlan() async {
     if (!_hasCandidate || _cameraMoving || _resolvingAddress) return;
@@ -339,6 +458,20 @@ class _MapTripPlannerScreenState extends State<MapTripPlannerScreen> {
                   : () => _edit(_MapTripStep.destination),
             ),
           ),
+          if (pinning)
+            Positioned(
+              top: 137,
+              left: 16,
+              right: 16,
+              child: _MapPointSearchCard(
+                step: _step,
+                controller: _placeSearchController,
+                isSearching: _isSearchingPlace,
+                isFindingPreciseLocation: _isFindingPreciseLocation,
+                onSearch: _searchForPlace,
+                onUsePreciseLocation: _usePreciseLocation,
+              ),
+            ),
           if (route != null)
             Positioned(
               left: 16,
@@ -428,11 +561,11 @@ class _MapTripPlannerScreenState extends State<MapTripPlannerScreen> {
     _MapTripStep.pickup =>
       _resolvingAddress
           ? 'Finding the pickup address…'
-          : 'Move the map so the pin marks your exact pickup.',
+          : 'Search, use precise GPS, or move the map to set your pickup pin.',
     _MapTripStep.destination =>
       _resolvingAddress
           ? 'Finding the destination address…'
-          : 'Move the map so the pin marks your destination.',
+          : 'Search for your destination, then fine-tune the center pin.',
     _MapTripStep.directions =>
       _plan?.source == RideRouteSource.googleRoutes
           ? 'Route directions are ready. Choose one, then confirm.'
@@ -502,6 +635,124 @@ class _TripCenterPin extends StatelessWidget {
     return Transform.translate(
       offset: const Offset(0, -25),
       child: Icon(Icons.location_on_rounded, color: color, size: 58),
+    );
+  }
+}
+
+class _MapPointSearchCard extends StatelessWidget {
+  const _MapPointSearchCard({
+    required this.step,
+    required this.controller,
+    required this.isSearching,
+    required this.isFindingPreciseLocation,
+    required this.onSearch,
+    required this.onUsePreciseLocation,
+  });
+
+  final _MapTripStep step;
+  final TextEditingController controller;
+  final bool isSearching;
+  final bool isFindingPreciseLocation;
+  final VoidCallback onSearch;
+  final VoidCallback onUsePreciseLocation;
+
+  bool get _isPickup => step == _MapTripStep.pickup;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final pointName = _isPickup ? 'pickup' : 'destination';
+
+    return Material(
+      color: colors.surface.withValues(alpha: 0.97),
+      elevation: 5,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _isPickup ? 'Choose your pickup' : 'Choose your destination',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const Key('map-trip-place-search-field'),
+                    controller: controller,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => onSearch(),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: _isPickup
+                          ? 'Search pickup area or address'
+                          : 'Search destination or landmark',
+                      prefixIcon: Icon(
+                        _isPickup
+                            ? Icons.trip_origin_rounded
+                            : Icons.location_on_rounded,
+                        color: _isPickup ? AppColors.success : AppColors.error,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  key: const Key('map-trip-search-button'),
+                  tooltip: 'Search $pointName',
+                  onPressed: isSearching ? null : onSearch,
+                  icon: isSearching
+                      ? const SizedBox.square(
+                          dimension: 19,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.search_rounded),
+                ),
+              ],
+            ),
+            if (_isPickup) ...[
+              const SizedBox(height: 9),
+              OutlinedButton.icon(
+                key: const Key('map-trip-precise-location-button'),
+                onPressed: isFindingPreciseLocation
+                    ? null
+                    : onUsePreciseLocation,
+                icon: isFindingPreciseLocation
+                    ? const SizedBox.square(
+                        dimension: 17,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location_rounded),
+                label: Text(
+                  isFindingPreciseLocation
+                      ? 'Finding your precise location...'
+                      : 'Use my precise location',
+                ),
+              ),
+            ],
+            const SizedBox(height: 7),
+            Text(
+              'Search first, then drag the map if needed. The center pin is the exact $pointName saved to your ride.',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
