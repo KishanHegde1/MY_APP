@@ -189,9 +189,13 @@ final class BackendRideBookingRepository implements RideBookingRepository {
     'routeSource': checkout.planSource == RideRouteSource.googleRoutes
         ? 'GOOGLE_ROUTES'
         : 'ESTIMATED_PREVIEW',
-    'distanceKm': checkout.route.distanceKm,
+    // Route providers can return floating-point values such as
+    // 1.6000000000000003. The API intentionally accepts a maximum of three
+    // decimal places for distance and two for fare, so normalize before JSON
+    // encoding instead of sending an otherwise invisible precision error.
+    'distanceKm': _decimal(checkout.route.distanceKm, fractionDigits: 3),
     'durationMinutes': checkout.route.durationMinutes,
-    'estimatedFare': checkout.estimatedFare,
+    'estimatedFare': _decimal(checkout.estimatedFare, fractionDigits: 2),
     'paymentMethod': paymentMethod.apiValue,
     if (checkout.route.encodedPolyline != null)
       'encodedPolyline': checkout.route.encodedPolyline,
@@ -308,6 +312,9 @@ final class BackendRideBookingRepository implements RideBookingRepository {
       : value is num
       ? value.toInt()
       : int.tryParse(value?.toString() ?? '');
+
+  static double _decimal(double value, {required int fractionDigits}) =>
+      double.parse(value.toStringAsFixed(fractionDigits));
 
   static String? _messageFrom(Object? response) {
     final root = _asMap(response);

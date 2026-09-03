@@ -86,16 +86,6 @@ class _TripPlannerSectionState extends State<TripPlannerSection> {
     return plan.routes.first;
   }
 
-  @override
-  void didUpdateWidget(covariant TripPlannerSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedVehicle != widget.selectedVehicle) {
-      _plan = null;
-      _selectedRouteId = null;
-      _error = null;
-    }
-  }
-
   Future<void> _planTripOnMap() async {
     final vehicle = widget.selectedVehicle;
     if (vehicle == null) {

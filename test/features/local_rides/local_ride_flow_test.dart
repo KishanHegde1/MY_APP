@@ -93,6 +93,54 @@ void main() {
     expect(find.text('MG Road'), findsWidgets);
     expect(find.text('3.2 km'), findsWidgets);
   });
+
+  testWidgets('keeps pinned locations and recalculates fare by vehicle', (
+    tester,
+  ) async {
+    var mapLaunches = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LocalRideHomeScreen(
+          pickupLocationRepository: _FakePickupLocationRepository(),
+          enableGoogleMap: false,
+          mapTripPlanner: (_, _, _, _) async {
+            mapLaunches += 1;
+            return _mapSelection();
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Bike').first);
+    await tester.pumpAndSettle();
+    final openGoogleMaps = find.byKey(const Key('open-google-maps-button'));
+    await tester.ensureVisible(openGoogleMaps);
+    await tester.tap(openGoogleMaps);
+    await tester.pumpAndSettle();
+    expect(mapLaunches, 1);
+
+    await tester.tap(find.text('Car').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Pinned route'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        'Pinned route, 3.2 kilometres, 12 minutes, 140 rupees',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Riksha').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Pinned route'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        'Pinned route, 3.2 kilometres, 12 minutes, 90 rupees',
+      ),
+      findsOneWidget,
+    );
+    expect(mapLaunches, 1);
+  });
 }
 
 MapTripSelection _mapSelection() {
