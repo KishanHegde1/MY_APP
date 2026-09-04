@@ -32,6 +32,22 @@ export class LocalRidesController {
     return this.localRidesService.getScaffold();
   }
 
+  @Get('bookings')
+  @Version('1')
+  @UseGuards(FirebaseOrJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'List the authenticated customer’s local-ride bookings',
+    description:
+      'Returns saved ride details and the current booking/payment status. Driver assignment and live GPS tracking are added separately.',
+  })
+  listBookings(@CurrentUser() user: JwtPayload | undefined) {
+    if (user == null) {
+      throw new UnauthorizedException('Authentication is required.');
+    }
+    return this.localRidesService.listBookings(user.sub);
+  }
+
   @Post('bookings')
   @Version('1')
   @HttpCode(HttpStatus.CREATED)

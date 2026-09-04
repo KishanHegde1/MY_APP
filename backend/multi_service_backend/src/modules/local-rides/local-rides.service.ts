@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { API_PLACEHOLDER_MESSAGE } from '../../common/constants/app.constants';
 import { LocalRideVehicleType } from '../../common/enums/local-ride-vehicle-type.enum';
 import { ServiceType } from '../../common/enums/service-type.enum';
@@ -62,6 +62,32 @@ export interface VerifiedRazorpayPayment {
   bookingStatus: BookingStatus.CONFIRMED;
   estimatedFare: number;
   currency: 'INR';
+}
+
+export interface LocalRideBookingSummary {
+  bookingId: string;
+  rideId: string;
+  status: BookingStatus;
+  paymentMethod: string;
+  paymentStatus: PaymentStatus | null;
+  estimatedFare: number;
+  currency: 'INR';
+  vehicleType: LocalRideVehicleType;
+  pickup: {
+    latitude: number;
+    longitude: number;
+    label: string;
+  };
+  destination: {
+    latitude: number;
+    longitude: number;
+    label: string;
+  };
+  distanceKm: number;
+  durationMinutes: number;
+  createdAt: string;
+  trackingAvailable: false;
+  trackingMessage: string;
 }
 
 @Injectable()
@@ -186,6 +212,38 @@ export class LocalRidesService {
       );
       return this.bookingResponse(booking, ride);
     });
+  }
+
+  async listBookings(
+    authenticatedUserId: string,
+  ): Promise<LocalRideBookingSummary[]> {
+    this.assertAuthenticatedUser(authenticatedUserId);
+    const rides = await this.dataSource.getRepository(LocalRide).find({
+      where: { customer: { id: authenticatedUserId } },
+      relations: { booking: true },
+      order: { createdAt: 'DESC' },
+    });
+    if (rides.length === 0) return [];
+
+    const bookingIds = rides.map((ride) => ride.booking.id);
+    const payments = await this.dataSource.getRepository(Payment).find({
+      where: { booking: { id: In(bookingIds) } },
+      relations: { booking: true },
+      order: { createdAt: 'DESC' },
+    });
+    const paymentStatusByBookingId = new Map<string, PaymentStatus>();
+    for (const payment of payments) {
+      if (!paymentStatusByBookingId.has(payment.booking.id)) {
+        paymentStatusByBookingId.set(payment.booking.id, payment.status);
+      }
+    }
+
+    return rides.map((ride) =>
+      this.bookingSummaryResponse(
+        ride,
+        paymentStatusByBookingId.get(ride.booking.id) ?? null,
+      ),
+    );
   }
 
   async createRazorpayOrder(
@@ -333,6 +391,41 @@ export class LocalRidesService {
       paymentMethod: booking.selectedPaymentMethod ?? 'CASH',
       estimatedFare: Number(ride.estimatedFare),
       currency: 'INR',
+    };
+  }
+
+  private bookingSummaryResponse(
+    ride: LocalRide,
+    paymentStatus: PaymentStatus | null,
+  ): LocalRideBookingSummary {
+    const booking = ride.booking;
+    return {
+      bookingId: booking.id,
+      rideId: ride.id,
+      status: booking.status,
+      paymentMethod: booking.selectedPaymentMethod ?? 'CASH',
+      paymentStatus,
+      estimatedFare: Number(ride.estimatedFare),
+      currency: 'INR',
+      vehicleType: ride.vehicleType,
+      pickup: {
+        latitude: Number(ride.pickupLatitude),
+        longitude: Number(ride.pickupLongitude),
+        label: ride.pickupAddress,
+      },
+      destination: {
+        latitude: Number(ride.dropLatitude),
+        longitude: Number(ride.dropLongitude),
+        label: ride.dropAddress,
+      },
+      distanceKm: ride.distanceMeters / 1000,
+      durationMinutes: Math.ceil(ride.durationSeconds / 60),
+      createdAt: ride.createdAt.toISOString(),
+      trackingAvailable: false,
+      trackingMessage:
+        booking.status === BookingStatus.CONFIRMED
+          ? 'Payment is confirmed. Driver assignment and live tracking will appear here once a driver accepts the ride.'
+          : 'Your ride request is saved. Driver assignment and live tracking will appear here once available.',
     };
   }
 
