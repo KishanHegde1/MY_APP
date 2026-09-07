@@ -35,6 +35,7 @@ migrate_working_dir/
 android/build/
 
 # Local environment and backend build files
+.render-backend/
 **/.env
 **/.env.*
 !**/.env.example
