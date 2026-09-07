@@ -6,6 +6,7 @@ import '../features/authentication/presentation/screens/forgot_password_screen.d
 import '../features/authentication/presentation/screens/login_screen.dart';
 import '../features/authentication/presentation/screens/otp_screen.dart';
 import '../features/authentication/presentation/screens/register_screen.dart';
+import '../features/authentication/presentation/screens/role_selection_screen.dart';
 import '../features/bookings/presentation/screens/my_bookings_screen.dart';
 import '../features/driver/presentation/screens/driver_dashboard_screen.dart';
 import '../features/favourites/presentation/screens/favourites_screen.dart';
@@ -48,6 +49,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: AppRoutes.completeProfile,
       builder: (_, _) => const CompleteProfileScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.chooseRole,
+      builder: (_, _) => const RoleSelectionScreen(),
     ),
     GoRoute(
       path: AppRoutes.localRides,

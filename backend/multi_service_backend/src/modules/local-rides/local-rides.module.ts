@@ -11,6 +11,7 @@ import { RazorpayGatewayService } from '../../integrations/razorpay/razorpay-gat
 import { AuthModule } from '../auth/auth.module';
 import { CurrentPickupLocationController } from './current-pickup-location.controller';
 import {
+  DriverAccessController,
   DriverLocalRidesController,
   LocalRidesController,
 } from './local-rides.controller';
@@ -24,6 +25,7 @@ import { LocalRidesService } from './local-rides.service';
   ],
   controllers: [
     LocalRidesController,
+    DriverAccessController,
     DriverLocalRidesController,
     CurrentPickupLocationController,
   ],

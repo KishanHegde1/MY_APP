@@ -51,7 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       TextInput.finishAutofillContext();
       if (!mounted) return;
-      context.go(AppRoutes.home);
+      context.go(AppRoutes.chooseRole);
     } catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = firebaseAuthMessage(error));

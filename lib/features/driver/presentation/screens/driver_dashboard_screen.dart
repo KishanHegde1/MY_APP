@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/dependency_injection/service_locator.dart';
 import '../../../../core/services/location_service.dart';
+import '../../../../routes/app_routes.dart';
 import '../../data/driver_local_rides_api.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
@@ -139,6 +141,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       appBar: AppBar(
         title: const Text('Driver workspace'),
         actions: [
+          IconButton(
+            onPressed: () => context.push(AppRoutes.localRides),
+            tooltip: 'Book a ride',
+            icon: const Icon(Icons.add_road_rounded),
+          ),
           IconButton(onPressed: _refresh, tooltip: 'Refresh rides', icon: const Icon(Icons.refresh_rounded)),
         ],
       ),

@@ -95,7 +95,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
             behavior: SnackBarBehavior.floating,
           ),
         );
-      context.go(AppRoutes.home);
+      context.go(AppRoutes.chooseRole);
     } catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = firebaseAuthMessage(error));

@@ -87,6 +87,10 @@ final class DriverLocalRidesApi {
   final AppConfig _config;
   final Dio _dio;
 
+  Future<void> activateDriverAccess() async {
+    await _write('/driver/activate');
+  }
+
   Future<List<DriverRideRequest>> listRequests() async {
     final body = await _get('/driver/local-rides/requests');
     if (body is! List<Object?>) {

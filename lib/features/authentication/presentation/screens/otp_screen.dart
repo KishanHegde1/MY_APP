@@ -144,7 +144,9 @@ class _OtpScreenState extends State<OtpScreen> {
 
       TextInput.finishAutofillContext();
       if (!mounted) return;
-      context.go(needsProfile ? AppRoutes.completeProfile : AppRoutes.home);
+      context.go(
+        needsProfile ? AppRoutes.completeProfile : AppRoutes.chooseRole,
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = firebaseAuthMessage(error));

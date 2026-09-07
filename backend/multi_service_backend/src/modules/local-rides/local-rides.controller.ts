@@ -131,6 +131,29 @@ export class LocalRidesController {
 
 }
 
+@ApiTags('driver-access')
+@Controller('driver')
+@UseGuards(FirebaseOrJwtAuthGuard)
+@ApiBearerAuth()
+export class DriverAccessController {
+  constructor(private readonly localRidesService: LocalRidesService) {}
+
+  @Post('activate')
+  @Version('1')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Enable driver access for the authenticated account',
+    description:
+      'The account remains a customer and can still book rides after enabling driver access.',
+  })
+  activate(@CurrentUser() user: JwtPayload | undefined) {
+    if (user == null) {
+      throw new UnauthorizedException('Authentication is required.');
+    }
+    return this.localRidesService.activateDriverAccess(user.sub);
+  }
+}
+
 @ApiTags('driver-local-rides')
 @Controller('driver/local-rides')
 @UseGuards(FirebaseOrJwtAuthGuard, RolesGuard)

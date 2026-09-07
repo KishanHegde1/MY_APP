@@ -32,7 +32,7 @@ class _SplashScreenState extends State<SplashScreen> {
     } catch (_) {
       // Firebase is intentionally absent in lightweight widget tests.
     }
-    context.go(hasSession ? AppRoutes.home : AppRoutes.login);
+    context.go(hasSession ? AppRoutes.chooseRole : AppRoutes.login);
   }
 
   @override
