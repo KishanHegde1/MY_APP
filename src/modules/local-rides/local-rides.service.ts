@@ -13,11 +13,13 @@ import { isUUID } from 'class-validator';
 import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { API_PLACEHOLDER_MESSAGE } from '../../common/constants/app.constants';
 import { LocalRideVehicleType } from '../../common/enums/local-ride-vehicle-type.enum';
+import { UserRoleType } from '../../common/enums/user-role.enum';
 import { ServiceType } from '../../common/enums/service-type.enum';
 import { Booking } from '../../entities/booking.entity';
 import { LocalRide } from '../../entities/local-ride.entity';
 import { Payment } from '../../entities/payment.entity';
 import { User } from '../../entities/user.entity';
+import { UserRole } from '../../entities/user-role.entity';
 import { PaymentStatus } from '../../common/enums/payment-status.enum';
 import { RazorpayGatewayService } from '../../integrations/razorpay/razorpay-gateway.service';
 import {
@@ -119,6 +121,11 @@ export interface DriverActiveRideSummary extends DriverRideRequestSummary {
   locationSharedAt: string | null;
 }
 
+export interface DriverAccessActivation {
+  role: UserRoleType.DRIVER;
+  message: string;
+}
+
 @Injectable()
 export class LocalRidesService {
   constructor(
@@ -132,6 +139,31 @@ export class LocalRidesService {
   getScaffold() {
     // TODO: enforce the configured minimum and maximum local-ride distances again when a booking is created.
     return { success: true, message: API_PLACEHOLDER_MESSAGE, data: null };
+  }
+
+  async activateDriverAccess(
+    authenticatedUserId: string,
+  ): Promise<DriverAccessActivation> {
+    this.assertAuthenticatedUser(authenticatedUserId);
+    const roles = this.dataSource.getRepository(UserRole);
+    const existing = await roles.findOne({
+      where: {
+        user: { id: authenticatedUserId },
+        role: UserRoleType.DRIVER,
+      },
+    });
+    if (existing == null) {
+      await roles.save(
+        roles.create({
+          user: { id: authenticatedUserId } as User,
+          role: UserRoleType.DRIVER,
+        }),
+      );
+    }
+    return {
+      role: UserRoleType.DRIVER,
+      message: 'Driver access is ready. You can accept local ride requests.',
+    };
   }
 
   async saveCurrentPickup(
