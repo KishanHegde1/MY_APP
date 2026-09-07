@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { API_PLACEHOLDER_MESSAGE } from '../../common/constants/app.constants';
 import { LocalRideVehicleType } from '../../common/enums/local-ride-vehicle-type.enum';
 import { ServiceType } from '../../common/enums/service-type.enum';
@@ -86,8 +86,37 @@ export interface LocalRideBookingSummary {
   distanceKm: number;
   durationMinutes: number;
   createdAt: string;
-  trackingAvailable: false;
+  trackingAvailable: boolean;
   trackingMessage: string;
+  driver: DriverTrackingSummary | null;
+}
+
+export interface DriverTrackingSummary {
+  acceptedAt: string;
+  location: {
+    latitude: number;
+    longitude: number;
+    updatedAt: string;
+  } | null;
+  estimatedArrivalMinutes: number | null;
+}
+
+export interface DriverRideRequestSummary {
+  rideId: string;
+  bookingId: string;
+  vehicleType: LocalRideVehicleType;
+  pickup: { latitude: number; longitude: number; label: string };
+  destination: { latitude: number; longitude: number; label: string };
+  distanceKm: number;
+  durationMinutes: number;
+  estimatedFare: number;
+  currency: 'INR';
+  createdAt: string;
+}
+
+export interface DriverActiveRideSummary extends DriverRideRequestSummary {
+  driverAcceptedAt: string;
+  locationSharedAt: string | null;
 }
 
 @Injectable()
@@ -220,7 +249,7 @@ export class LocalRidesService {
     this.assertAuthenticatedUser(authenticatedUserId);
     const rides = await this.dataSource.getRepository(LocalRide).find({
       where: { customer: { id: authenticatedUserId } },
-      relations: { booking: true },
+      relations: { booking: true, driver: true },
       order: { createdAt: 'DESC' },
     });
     if (rides.length === 0) return [];
@@ -244,6 +273,115 @@ export class LocalRidesService {
         paymentStatusByBookingId.get(ride.booking.id) ?? null,
       ),
     );
+  }
+
+  async listDriverRideRequests(
+    authenticatedDriverId: string,
+  ): Promise<DriverRideRequestSummary[]> {
+    this.assertAuthenticatedUser(authenticatedDriverId);
+    const rides = await this.dataSource.getRepository(LocalRide).find({
+      where: {
+        driver: IsNull(),
+        customer: { id: Not(authenticatedDriverId) },
+        booking: { status: In([BookingStatus.PENDING, BookingStatus.CONFIRMED]) },
+      },
+      relations: { booking: true },
+      order: { createdAt: 'ASC' },
+      take: 25,
+    });
+    return rides.map((ride) => this.driverRequestResponse(ride));
+  }
+
+  async listDriverActiveRide(
+    authenticatedDriverId: string,
+  ): Promise<DriverActiveRideSummary | null> {
+    this.assertAuthenticatedUser(authenticatedDriverId);
+    const ride = await this.dataSource.getRepository(LocalRide).findOne({
+      where: {
+        driver: { id: authenticatedDriverId },
+        booking: { status: In([BookingStatus.PENDING, BookingStatus.CONFIRMED]) },
+      },
+      relations: { booking: true },
+      order: { driverAcceptedAt: 'DESC' },
+    });
+    return ride == null ? null : this.driverActiveRideResponse(ride);
+  }
+
+  async acceptRide(
+    authenticatedDriverId: string,
+    rideId: string,
+  ): Promise<DriverActiveRideSummary> {
+    this.assertAuthenticatedUser(authenticatedDriverId);
+    if (!isUUID(rideId)) {
+      throw new BadRequestException('A valid ride ID is required.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const claimed = await manager.query<{ id: string }[]>(
+        `UPDATE local_rides
+         SET driver_id = $1, driver_accepted_at = NOW(), updated_at = NOW()
+         WHERE id = $2
+           AND driver_id IS NULL
+           AND customer_id <> $1
+           AND deleted_at IS NULL
+           AND booking_id IN (
+             SELECT id FROM bookings
+             WHERE status IN ('PENDING', 'CONFIRMED') AND deleted_at IS NULL
+           )
+         RETURNING id`,
+        [authenticatedDriverId, rideId],
+      );
+      if (claimed.length === 0) {
+        throw new BadRequestException(
+          'This ride is no longer available for acceptance.',
+        );
+      }
+
+      const ride = await manager.getRepository(LocalRide).findOne({
+        where: { id: rideId },
+        relations: { booking: true },
+      });
+      if (ride == null) {
+        throw new InternalServerErrorException('The accepted ride could not be loaded.');
+      }
+      if (ride.booking.status === BookingStatus.PENDING) {
+        ride.booking.status = BookingStatus.CONFIRMED;
+        await manager.getRepository(Booking).save(ride.booking);
+      }
+      return this.driverActiveRideResponse(ride);
+    });
+  }
+
+  async updateDriverLocation(
+    authenticatedDriverId: string,
+    rideId: string,
+    latitude: number,
+    longitude: number,
+  ): Promise<DriverActiveRideSummary> {
+    this.assertAuthenticatedUser(authenticatedDriverId);
+    if (!isUUID(rideId)) {
+      throw new BadRequestException('A valid ride ID is required.');
+    }
+    const updated = await this.dataSource.query<{ id: string }[]>(
+      `UPDATE local_rides
+       SET driver_latitude = $1,
+           driver_longitude = $2,
+           driver_location_updated_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $3 AND driver_id = $4 AND deleted_at IS NULL
+       RETURNING id`,
+      [latitude.toFixed(7), longitude.toFixed(7), rideId, authenticatedDriverId],
+    );
+    if (updated.length === 0) {
+      throw new NotFoundException('This active ride was not found for the driver.');
+    }
+    const ride = await this.dataSource.getRepository(LocalRide).findOne({
+      where: { id: rideId, driver: { id: authenticatedDriverId } },
+      relations: { booking: true },
+    });
+    if (ride == null) {
+      throw new NotFoundException('This active ride could not be loaded.');
+    }
+    return this.driverActiveRideResponse(ride);
   }
 
   async createRazorpayOrder(
@@ -421,12 +559,114 @@ export class LocalRidesService {
       distanceKm: ride.distanceMeters / 1000,
       durationMinutes: Math.ceil(ride.durationSeconds / 60),
       createdAt: ride.createdAt.toISOString(),
-      trackingAvailable: false,
-      trackingMessage:
-        booking.status === BookingStatus.CONFIRMED
-          ? 'Payment is confirmed. Driver assignment and live tracking will appear here once a driver accepts the ride.'
-          : 'Your ride request is saved. Driver assignment and live tracking will appear here once available.',
+      trackingAvailable: ride.driver != null,
+      trackingMessage: this.trackingMessage(ride),
+      driver: this.driverTrackingResponse(ride),
     };
+  }
+
+  private driverRequestResponse(ride: LocalRide): DriverRideRequestSummary {
+    return {
+      rideId: ride.id,
+      bookingId: ride.booking.id,
+      vehicleType: ride.vehicleType,
+      pickup: {
+        latitude: Number(ride.pickupLatitude),
+        longitude: Number(ride.pickupLongitude),
+        label: ride.pickupAddress,
+      },
+      destination: {
+        latitude: Number(ride.dropLatitude),
+        longitude: Number(ride.dropLongitude),
+        label: ride.dropAddress,
+      },
+      distanceKm: ride.distanceMeters / 1000,
+      durationMinutes: Math.ceil(ride.durationSeconds / 60),
+      estimatedFare: Number(ride.estimatedFare),
+      currency: 'INR',
+      createdAt: ride.createdAt.toISOString(),
+    };
+  }
+
+  private driverActiveRideResponse(ride: LocalRide): DriverActiveRideSummary {
+    if (ride.driverAcceptedAt == null) {
+      throw new InternalServerErrorException('The driver acceptance time is missing.');
+    }
+    return {
+      ...this.driverRequestResponse(ride),
+      driverAcceptedAt: ride.driverAcceptedAt.toISOString(),
+      locationSharedAt: ride.driverLocationUpdatedAt?.toISOString() ?? null,
+    };
+  }
+
+  private driverTrackingResponse(ride: LocalRide): DriverTrackingSummary | null {
+    if (ride.driver == null || ride.driverAcceptedAt == null) return null;
+    const hasLocation =
+      ride.driverLatitude != null &&
+      ride.driverLongitude != null &&
+      ride.driverLocationUpdatedAt != null;
+    return {
+      acceptedAt: ride.driverAcceptedAt.toISOString(),
+      location: hasLocation
+          ? {
+              latitude: Number(ride.driverLatitude),
+              longitude: Number(ride.driverLongitude),
+              updatedAt: ride.driverLocationUpdatedAt!.toISOString(),
+            }
+          : null,
+      estimatedArrivalMinutes: hasLocation
+          ? this.estimateDriverArrivalMinutes(ride)
+          : null,
+    };
+  }
+
+  private trackingMessage(ride: LocalRide): string {
+    if (ride.driver == null) {
+      return ride.booking.status === BookingStatus.CONFIRMED
+          ? 'Ride confirmed. We are looking for a nearby driver.'
+          : 'Your ride request is saved. A driver can accept it shortly.';
+    }
+    if (ride.driverLocationUpdatedAt == null) {
+      return 'Driver accepted your ride and is preparing to share their live location.';
+    }
+    return 'Driver is sharing their live location.';
+  }
+
+  private estimateDriverArrivalMinutes(ride: LocalRide): number {
+    const driverLatitude = Number(ride.driverLatitude);
+    const driverLongitude = Number(ride.driverLongitude);
+    const pickupLatitude = Number(ride.pickupLatitude);
+    const pickupLongitude = Number(ride.pickupLongitude);
+    const distanceKm = this.haversineDistanceKm(
+      driverLatitude,
+      driverLongitude,
+      pickupLatitude,
+      pickupLongitude,
+    );
+    const averageKph =
+      ride.vehicleType === LocalRideVehicleType.BIKE
+          ? 24
+          : ride.vehicleType === LocalRideVehicleType.AUTO
+          ? 22
+          : 28;
+    return Math.max(1, Math.ceil((distanceKm / averageKph) * 60));
+  }
+
+  private haversineDistanceKm(
+    latitudeA: number,
+    longitudeA: number,
+    latitudeB: number,
+    longitudeB: number,
+  ): number {
+    const radians = Math.PI / 180;
+    const latitudeDelta = (latitudeB - latitudeA) * radians;
+    const longitudeDelta = (longitudeB - longitudeA) * radians;
+    const origin = latitudeA * radians;
+    const destination = latitudeB * radians;
+    const value =
+      Math.sin(latitudeDelta / 2) ** 2 +
+      Math.cos(origin) * Math.cos(destination) * Math.sin(longitudeDelta / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
   }
 
   private verifiedPaymentResponse(

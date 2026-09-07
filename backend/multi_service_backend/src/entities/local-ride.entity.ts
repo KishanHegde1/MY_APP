@@ -26,6 +26,38 @@ export class LocalRide extends BaseEntity {
   @JoinColumn({ name: 'customer_id' })
   customer!: User;
 
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'driver_id' })
+  driver?: User | null;
+
+  @Column({ name: 'driver_accepted_at', type: 'timestamptz', nullable: true })
+  driverAcceptedAt?: Date | null;
+
+  @Column({
+    name: 'driver_latitude',
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  driverLatitude?: string | null;
+
+  @Column({
+    name: 'driver_longitude',
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  driverLongitude?: string | null;
+
+  @Column({
+    name: 'driver_location_updated_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  driverLocationUpdatedAt?: Date | null;
+
   @Column({ name: 'pickup_latitude', type: 'decimal', precision: 10, scale: 7 })
   pickupLatitude!: string;
 
